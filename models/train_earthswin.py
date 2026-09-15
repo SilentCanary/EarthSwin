@@ -15,6 +15,33 @@ from earthswin_model import EarthSwin
 from graph_dataset import GraphTrainingDataset
 
 
+def compute_pr_metrics(scores, labels, precision_floor=0.3):
+
+    order = np.argsort(-scores)
+    scores, labels = scores[order], labels[order]
+
+    tp = np.cumsum(labels)
+    fp = np.cumsum(1 - labels)
+    total_pos = labels.sum()
+
+    if total_pos == 0:
+        return {"pr_auc": float("nan"), "recall_at_precision": float("nan")}
+
+    precision = tp / np.maximum(tp + fp, 1)
+    recall = tp / total_pos
+
+    trapezoid_fn = getattr(np, "trapezoid", None) or np.trapz
+    pr_auc = trapezoid_fn(precision, recall)
+
+    valid = precision >= precision_floor
+    recall_at_precision = recall[valid].max() if valid.any() else 0.0
+
+    return {
+        "pr_auc": float(pr_auc),
+        "recall_at_precision": float(recall_at_precision),
+    }
+
+
 PROJECT_DIR = "C:/Users/advit/Documents/major project"
 
 TEMPORAL_DIR = (
@@ -531,6 +558,14 @@ def validate(
     total_loss = 0.0
     total_samples = 0
 
+    # NEW: collected across all validation groups so PR-AUC /
+    # recall-at-precision can be computed over the whole val split,
+    # not per-group (a single group may have 0 or 1 positives, which
+    # isn't enough to compute a meaningful precision/recall curve on
+    # its own).
+    all_scores = []
+    all_labels = []
+
     with torch.no_grad():
 
         for group_number, group in enumerate(
@@ -591,11 +626,26 @@ def validate(
                 f"  Loss: {loss.item():.6f}"
             )
 
+            # NEW: stash this group's scores/labels for the PR metrics
+            scores = torch.sigmoid(
+                supervised_logits
+            ).squeeze(1).detach().cpu().numpy()
+
+            all_scores.append(scores)
+            all_labels.append(
+                labels.squeeze(1).cpu().numpy()
+            )
+
     average_loss = (
         total_loss / total_samples
     )
 
-    return average_loss
+    # NEW
+    all_scores = np.concatenate(all_scores)
+    all_labels = np.concatenate(all_labels)
+    val_metrics = compute_pr_metrics(all_scores, all_labels)
+
+    return average_loss, val_metrics
 
 
 # ============================================================
@@ -701,6 +751,7 @@ def main():
   
 
     best_val_loss = float("inf")
+    best_val_score = -1.0  # NEW: recall-at-precision / PR-AUC, used for selection
 
     history = []
 
@@ -730,7 +781,7 @@ def main():
             f"{train_loss:.6f}"
         )
 
-        val_loss = validate(
+        val_loss, val_metrics = validate(
             model=model,
             loader=val_loader,
             groups=val_groups,
@@ -743,19 +794,41 @@ def main():
             f"{val_loss:.6f}"
         )
 
+        # NEW
+        print(
+            f"VALIDATION PR-AUC: "
+            f"{val_metrics['pr_auc']:.4f}"
+        )
+
+        print(
+            f"VALIDATION RECALL@P0.3: "
+            f"{val_metrics['recall_at_precision']:.4f}"
+        )
+
         history.append(
             {
                 "epoch": epoch,
                 "train_loss": train_loss,
-                "val_loss": val_loss
+                "val_loss": val_loss,
+                "val_pr_auc": val_metrics["pr_auc"],
+                "val_recall_at_precision": val_metrics["recall_at_precision"]
             }
         )
 
-        # SAVE BEST MODEL
+        score = val_metrics["recall_at_precision"]
+
+        if np.isnan(score):
+            score = val_metrics["pr_auc"]
+
+        if np.isnan(score):
+            score = -val_loss
 
         if val_loss < best_val_loss:
-
             best_val_loss = val_loss
+
+        if score > best_val_score:
+
+            best_val_score = score
 
             torch.save(
                 {
@@ -763,7 +836,9 @@ def main():
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
-                    "val_loss": val_loss
+                    "val_loss": val_loss,
+                    "val_pr_auc": val_metrics["pr_auc"],
+                    "val_recall_at_precision": val_metrics["recall_at_precision"]
                 },
                 BEST_MODEL_PATH
             )
@@ -798,8 +873,13 @@ def main():
     print("=" * 60)
 
     print(
-        f"Best validation loss: "
+        f"Best validation loss (for reference only, not used for selection): "
         f"{best_val_loss:.6f}"
+    )
+
+    print(
+        f"Best validation score (recall@precision / PR-AUC, used for selection): "
+        f"{best_val_score:.4f}"
     )
 
     print(
