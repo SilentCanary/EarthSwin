@@ -256,20 +256,23 @@ def create_chunks(
 
 if __name__ == "__main__":
 
+    project_dir = os.path.dirname(os.path.dirname(__file__))
+    dataset_dir = os.path.join(
+        project_dir,
+        "dataset",
+        "EarthSentinel_2016",
+    )
+
     create_chunks(
 
-        input_dir=(
-            "C:/Users/advit/Documents/"
-            "major project/dataset/"
-            "EarthSentinel_2016/"
-            "multiscale_patches"
+        input_dir=os.path.join(
+            dataset_dir,
+            "multiscale_patches",
         ),
 
-        output_dir=(
-            "C:/Users/advit/Documents/"
-            "major project/dataset/"
-            "EarthSentinel_2016/"
-            "patch_chunks"
+        output_dir=os.path.join(
+            dataset_dir,
+            "patch_chunks",
         ),
 
         patches_per_chunk=100,

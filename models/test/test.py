@@ -12,7 +12,11 @@ from graph import DynamicGraphConstructor
 # Paths
 # --------------------------------------------------
 
-BASE_PATH = "C:/Users/advit/Documents/major project/dataset/EarthSentinel_2016"
+BASE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "dataset",
+    "EarthSentinel_2016",
+)
 
 CHUNK_PATH = os.path.join(
     BASE_PATH,
@@ -37,7 +41,9 @@ NORMALIZATION_PATH = os.path.join(
 NUM_ANCHORS = 9
 K = 8
 
-device = torch.device("cpu")
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
+)
 
 print("Device:", device)
 

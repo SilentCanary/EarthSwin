@@ -7,9 +7,15 @@ import torch
 from graph import DynamicGraphConstructor
 
 
-PATCH_DIR = "C:/Users/advit/Documents/major project/dataset/EarthSentinel_2016/multiscale_patches"
-TEMPORAL_DIR = "C:/Users/advit/Documents/major project/dataset/EarthSentinel_2016/temporal_dataset"
-OUTPUT_DIR = "C:/Users/advit/Documents/major project/dataset/EarthSentinel_2016/graphs"
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+DATASET_DIR = os.path.join(
+    PROJECT_DIR,
+    "dataset",
+    "EarthSentinel_2016",
+)
+PATCH_DIR = os.path.join(DATASET_DIR, "multiscale_patches")
+TEMPORAL_DIR = os.path.join(DATASET_DIR, "temporal_dataset")
+OUTPUT_DIR = os.path.join(DATASET_DIR, "graphs")
 
 
 SPLITS = {

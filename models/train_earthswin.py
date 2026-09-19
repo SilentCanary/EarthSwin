@@ -7,29 +7,33 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 
-sys.path.append(
-    "C:/Users/advit/Documents/major project/models"
-)
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.append(os.path.dirname(__file__))
 
 from earthswin_model import EarthSwin
 from graph_dataset import GraphTrainingDataset
 
 
-PROJECT_DIR = "C:/Users/advit/Documents/major project"
-
 TEMPORAL_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/temporal_dataset"
+    os.path.join(
+        PROJECT_DIR,
+        "dataset",
+        "EarthSentinel_2016",
+        "temporal_dataset",
+    )
 )
 
 GRAPH_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/graphs"
+    os.path.join(
+        PROJECT_DIR,
+        "dataset",
+        "EarthSentinel_2016",
+        "graphs",
+    )
 )
 
 MODEL_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "models"
+    os.path.join(PROJECT_DIR, "models")
 )
 
 TRAIN_BALANCED_CSV = os.path.join(
@@ -65,13 +69,16 @@ LEARNING_RATE = 1e-4
 
 WEIGHT_DECAY = 1e-4
 
-BATCH_SIZE = 8
+BATCH_SIZE = 1
 
 GRADIENT_CLIP = 1.0
 
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
 )
+
+AMP_ENABLED = DEVICE.type == "cuda"
+FREEZE_PATCH_PYRAMID = True
 
 
 # LOAD GRAPH
@@ -235,23 +242,25 @@ def compute_pyramid_features(
             for key, value in week_3_inputs.items()
         }
 
-        features_1 = model.patch_pyramid(
-            week_1_inputs["patch_64"],
-            week_1_inputs["patch_128"],
-            week_1_inputs["patch_256"]
-        )
+        context = torch.no_grad() if FREEZE_PATCH_PYRAMID else torch.enable_grad()
+        with context:
+            features_1 = model.patch_pyramid(
+                week_1_inputs["patch_64"],
+                week_1_inputs["patch_128"],
+                week_1_inputs["patch_256"]
+            )
 
-        features_2 = model.patch_pyramid(
-            week_2_inputs["patch_64"],
-            week_2_inputs["patch_128"],
-            week_2_inputs["patch_256"]
-        )
+            features_2 = model.patch_pyramid(
+                week_2_inputs["patch_64"],
+                week_2_inputs["patch_128"],
+                week_2_inputs["patch_256"]
+            )
 
-        features_3 = model.patch_pyramid(
-            week_3_inputs["patch_64"],
-            week_3_inputs["patch_128"],
-            week_3_inputs["patch_256"]
-        )
+            features_3 = model.patch_pyramid(
+                week_3_inputs["patch_64"],
+                week_3_inputs["patch_128"],
+                week_3_inputs["patch_256"]
+            )
 
         all_week_1_features.append(
             features_1
@@ -373,23 +382,27 @@ def forward_group(
         DEVICE
     )
 
-    spatial_features_1 = model.gat(
-        week_1_features,
-        edge_index_1,
-        edge_weights_1
-    )
+    with torch.autocast(
+        device_type=DEVICE.type,
+        enabled=False,
+    ):
+        spatial_features_1 = model.gat(
+            week_1_features.float(),
+            edge_index_1,
+            edge_weights_1.float()
+        )
 
-    spatial_features_2 = model.gat(
-        week_2_features,
-        edge_index_2,
-        edge_weights_2
-    )
+        spatial_features_2 = model.gat(
+            week_2_features.float(),
+            edge_index_2,
+            edge_weights_2.float()
+        )
 
-    spatial_features_3 = model.gat(
-        week_3_features,
-        edge_index_3,
-        edge_weights_3
-    )
+        spatial_features_3 = model.gat(
+            week_3_features.float(),
+            edge_index_3,
+            edge_weights_3.float()
+        )
 
     temporal_features = torch.stack(
         [
@@ -424,6 +437,9 @@ def train_one_epoch(
 
     model.train()
 
+    if FREEZE_PATCH_PYRAMID:
+        model.patch_pyramid.eval()
+
     total_loss = 0.0
     total_samples = 0
 
@@ -441,12 +457,17 @@ def train_one_epoch(
 
         optimizer.zero_grad()
 
-        logits = forward_group(
-            model=model,
-            loader=loader,
-            graph_split="train",
-            group=group
-        )
+        with torch.autocast(
+            device_type=DEVICE.type,
+            dtype=torch.float16,
+            enabled=AMP_ENABLED,
+        ):
+            logits = forward_group(
+                model=model,
+                loader=loader,
+                graph_split="train",
+                group=group
+            )
 
         supervised_anchor_ids = group[
             "anchor_ids"
@@ -543,12 +564,17 @@ def validate(
                 f"{group_number}/{len(groups)}"
             )
 
-            logits = forward_group(
-                model=model,
-                loader=loader,
-                graph_split="val",
-                group=group
-            )
+            with torch.autocast(
+                device_type=DEVICE.type,
+                dtype=torch.float16,
+                enabled=AMP_ENABLED,
+            ):
+                logits = forward_group(
+                    model=model,
+                    loader=loader,
+                    graph_split="val",
+                    group=group
+                )
 
             supervised_anchor_ids = group[
                 "anchor_ids"
@@ -679,6 +705,10 @@ def main():
         temporal_feedforward_dim=1024,
         dropout=0.1
     )
+
+    if FREEZE_PATCH_PYRAMID:
+        model.patch_pyramid.requires_grad_(False)
+        model.patch_pyramid.eval()
 
     model = model.to(DEVICE)
 

@@ -3,16 +3,18 @@ import torch
 import pandas as pd
 
 import sys
+import os
 
-sys.path.append(
-    "C:/Users/advit/Documents/major project/preprocessing"
-)
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.append(os.path.join(PROJECT_DIR, "preprocessing"))
 
 from create_pytorch_dataset import EarthSentinelDataset, load_normalization_stats
 
-TEMPORAL_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/temporal_dataset"
+TEMPORAL_DIR = os.path.join(
+    PROJECT_DIR,
+    "dataset",
+    "EarthSentinel_2016",
+    "temporal_dataset",
 )
 
 

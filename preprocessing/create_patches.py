@@ -13,6 +13,7 @@ They will be handled later during dataset preparation.
 """
 
 import os
+import re
 import rasterio
 import numpy as np
 
@@ -22,11 +23,9 @@ def load_weekly_files(data_dir):
         (
             f for f in os.listdir(data_dir)
             if f.lower().endswith(".tif")
-            and f.startswith("HP_week_")
+            and f.startswith("HP_week")
         ),
-        key=lambda f: int(
-            f.split("_week_")[1].split(".")[0]
-        )
+        key=lambda f: int(re.search(r"HP_week(\d+)", f).group(1))
     )
 
     if not files:
@@ -182,10 +181,12 @@ def create_multiscale_patches(
             f"but found {len(files)}"
         )
 
-    if bands != 3:
+    if bands not in (3, 4):
         raise RuntimeError(
-            f"Expected 3 bands, but found {bands}"
+            f"Expected 3 or 4 bands, but found {bands}"
         )
+
+    source_band_indexes = (0, 1, 2) if bands == 3 else (0, 2, 3)
 
     # --------------------------------------------------
     # GENERATE ANCHORS
@@ -270,6 +271,12 @@ def create_multiscale_patches(
                 patch_sizes=patch_sizes,
             )
 
+            if bands == 4:
+                patches = {
+                    size: patch[:, source_band_indexes, :, :]
+                    for size, patch in patches.items()
+                }
+
             if len(patches) != len(patch_sizes):
                 continue
 
@@ -310,16 +317,16 @@ if __name__ == "__main__":
 
     create_multiscale_patches(
 
-        data_dir=(
-            "C:/Users/advit/Documents/"
-            "major project/dataset/"
-            "EarthSentinel_2016/merged"
+        data_dir=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "images",
         ),
 
-        output_dir=(
-            "C:/Users/advit/Documents/"
-            "major project/dataset/"
-            "EarthSentinel_2016/multiscale_patches"
+        output_dir=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "dataset",
+            "EarthSentinel_2016",
+            "multiscale_patches",
         ),
 
         patch_sizes=(64, 128, 256),

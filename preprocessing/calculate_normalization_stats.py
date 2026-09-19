@@ -3,15 +3,16 @@ import json
 import numpy as np
 import pandas as pd
 
-PATCH_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/multiscale_patches"
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+DATASET_DIR = os.path.join(
+    PROJECT_DIR,
+    "dataset",
+    "EarthSentinel_2016",
 )
 
-TEMPORAL_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/temporal_dataset"
-)
+PATCH_DIR = os.path.join(DATASET_DIR, "multiscale_patches")
+
+TEMPORAL_DIR = os.path.join(DATASET_DIR, "temporal_dataset")
 
 OUTPUT_PATH = os.path.join(
     TEMPORAL_DIR,

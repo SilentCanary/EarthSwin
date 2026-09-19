@@ -10,17 +10,21 @@ import pandas as pd
 # CONFIGURATION
 # ============================================================
 
-CHUNK_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/patch_chunks"
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+DATASET_DIR = os.path.join(
+    PROJECT_DIR,
+    "dataset",
+    "EarthSentinel_2016",
 )
 
-LABELS_PATH = "labels.npy"
+CHUNK_DIR = os.path.join(DATASET_DIR, "patch_chunks")
 
-OUTPUT_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/temporal_dataset"
+LABELS_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "labels.npy",
 )
+
+OUTPUT_DIR = os.path.join(DATASET_DIR, "temporal_dataset")
 
 NUM_WEEKS = 14
 WINDOW_SIZE = 3

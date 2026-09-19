@@ -2,12 +2,19 @@ import os
 import glob
 import numpy as np
 
-CHUNK_DIR = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/patch_chunks"
+PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+DATASET_DIR = os.path.join(
+    PROJECT_DIR,
+    "dataset",
+    "EarthSentinel_2016",
 )
 
-LABELS_PATH = "labels.npy"
+CHUNK_DIR = os.path.join(DATASET_DIR, "patch_chunks")
+
+LABELS_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "labels.npy",
+)
 
 labels = np.load(LABELS_PATH)
 

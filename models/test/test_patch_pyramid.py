@@ -1,3 +1,4 @@
+import os
 import sys
 import torch
 import numpy as np
@@ -13,10 +14,12 @@ from patch_pyramid import PatchPyramid
 # Load one real sample
 # --------------------------------------------------
 
-sample_path = (
-    "C:/Users/advit/Documents/major project/"
-    "dataset/EarthSentinel_2016/multiscale_patches/"
-    "sample_000796.npz"
+sample_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "dataset",
+    "EarthSentinel_2016",
+    "multiscale_patches",
+    "sample_000796.npz",
 )
 
 sample = np.load(sample_path)
