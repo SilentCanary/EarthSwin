@@ -1,0 +1,45 @@
+{
+  "checkpoint": "E:\\major\\EarthSwin\\models\\earthswin_best.pt",
+  "checkpoint_epoch": 7,
+  "train_loss": 0.1669945518227299,
+  "validation_loss": 0.2105332457770904,
+  "device": "cuda",
+  "threshold_selected_on": "validation",
+  "threshold": 0.05,
+  "validation": {
+    "threshold": 0.05,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "average_precision": 0.00024021138601969732,
+    "confusion_matrix": [
+      [
+        5004,
+        323
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n           0       1.00      0.94      0.97      5327\n           1       0.00      0.00      0.00         1\n\n    accuracy                           0.94      5328\n   macro avg       0.50      0.47      0.48      5328\nweighted avg       1.00      0.94      0.97      5328\n"
+  },
+  "test": {
+    "threshold": 0.05,
+    "precision": 0.0033222591362126247,
+    "recall": 0.5,
+    "f1": 0.006600660066006601,
+    "average_precision": 0.00223499530496544,
+    "confusion_matrix": [
+      [
+        5050,
+        300
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n           0       1.00      0.94      0.97      5350\n           1       0.00      0.50      0.01         2\n\n    accuracy                           0.94      5352\n   macro avg       0.50      0.72      0.49      5352\nweighted avg       1.00      0.94      0.97      5352\n"
+  }
+}
