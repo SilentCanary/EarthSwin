@@ -1,0 +1,30 @@
+# Tiny CPU config: synthetic data, runs in minutes. Used by tests and to prove the pipeline end to end.
+data:
+  root: data/synth
+  chip: 64
+  ctx: 32
+  t_max: 6
+  buffer_m: 0
+  num_workers: 0
+model:
+  dims: [16, 32, 64, 128]
+  depths: [1, 1, 1, 1]
+  heads: [2, 2, 4, 4]
+  window: 4
+  d_dec: 32
+  d_graph: 32
+  gat_heads: 2
+  t_heads: 2
+  knn: 4
+train:
+  out_dir: runs/smoke
+  epochs: 6
+  batch: 4
+  accum: 1
+  steps_per_epoch: 24
+  lr: 0.002
+  warmup_epochs: 1
+  amp: none
+  device: cpu
+  patience: 20
+  log_every: 12

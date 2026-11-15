@@ -1,0 +1,24 @@
+# Full-size model on the GPU, trained on synthetic data: proves the pipeline + shows the GPU memory/speed
+# before real data arrives. Generate data first:
+#   python -m pmgst.data.synth --out data/synth128 --chips 16 --chip 128 --ctx 64
+data:
+  root: data/synth128
+  chip: 128
+  ctx: 64
+  t_max: 8
+  buffer_m: 0
+  num_workers: 2
+model:
+  dims: [48, 96, 192, 384]
+  depths: [2, 2, 2, 2]
+  heads: [3, 6, 12, 24]
+  window: 8
+train:
+  out_dir: runs/synth128
+  epochs: 25
+  batch: 8
+  accum: 2
+  steps_per_epoch: 40
+  lr: 0.0003
+  amp: auto
+  patience: 10

@@ -76,3 +76,7 @@ EarthSwin v0 implements roughly a third of the diagram (pyramid, CNN+Swin, graph
 3. Is a paper submission a goal? (affects rigour and timeline)
 4. Earth Engine access set up? Inventory requests sent?
 5. Evaluation date for the major project?
+
+---
+## Code (added)
+Implementation of PMGST-Net-D (all 15 blocks of the diagram) lives in `pmgst/`. How to run it, what is tested and what is not: `13_BUILD_AND_RUN.md`.

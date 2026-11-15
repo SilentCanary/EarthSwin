@@ -2,3 +2,10 @@ data/
 dataset/
 *.pyc
 images/
+
+# pmgst
+runs/
+outputs/
+.pytest_cache/
+__pycache__/
+*.pt

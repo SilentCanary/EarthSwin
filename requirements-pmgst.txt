@@ -1,0 +1,19 @@
+# PMGST-Net-D. torch comes from your conda env (CUDA build); everything below is plain pip.
+# torch>=2.2
+numpy>=1.24
+scipy>=1.10
+pyyaml>=6.0
+scikit-learn>=1.3
+pytest>=7.4
+tqdm>=4.66
+
+# real-data path only (pmgst.data.gee_export / chips / infer GeoTIFF + GeoJSON)
+# rasterio>=1.3
+# geopandas>=0.14
+# shapely>=2.0
+# pyproj>=3.6
+# earthengine-api>=0.1.390
+
+# serving only (pmgst.serve)
+# fastapi>=0.110
+# uvicorn>=0.27

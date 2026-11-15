@@ -1,0 +1,23 @@
+# RTX 3060 6 GB / 16 GB RAM. Real data: build chips with pmgst.data.chips, then point data.root at them.
+# Run `python -m pmgst.profile_gpu --config configs/rtx3060.yaml` first and set train.batch to what fits.
+data:
+  root: data/chips
+  chip: 128          # 1.28 km at 10 m. Context scales: 2.56 km and 5.12 km, resampled to 64 px
+  ctx: 64
+  t_max: 8           # S1 dates per sample
+  buffer_m: 1280
+  num_workers: 2     # Windows: keep small; 0 if you see worker errors
+model:
+  dims: [48, 96, 192, 384]
+  depths: [2, 2, 2, 2]
+  heads: [3, 6, 12, 24]
+  window: 8
+  ckpt: false        # set true if profile_gpu runs out of memory at batch 4
+train:
+  out_dir: runs/pmgst_d_v1
+  epochs: 60
+  batch: 8           # chips per step (= graph size)
+  accum: 2
+  lr: 0.0003
+  amp: auto          # bf16 on RTX 30-series
+  patience: 12
