@@ -87,3 +87,20 @@ def test_region_holdout_split(cfg, tmp_path):
     cfg.data.holdout_region = "nowhere"
     with pytest.raises(ValueError):
         ChipDataset(cfg, "test")
+
+
+@pytest.mark.parametrize("arch", ["pmgst", "unet", "siam", "utae"])
+def test_no_gradient_explosion_when_s2_invalid(cfg, arch):
+    """Regression: GroupNorm on an all-zero (cloudy / dropped) S2 chip once gave 1e21 gradients in the siamese
+    baseline, and global clipping then froze training. Every arch must keep a sane gradient norm."""
+    cfg.model.arch = arch
+    cfg.data.test_fold, cfg.data.val_fold = 0, 1
+    ds = ChipDataset(cfg, "all", augment=False)
+    b = to_device(collate([ds[i] for i in range(6)]), torch.device("cpu"))
+    b["s2_valid"][:3] = 0; b["ctx_valid"][:3] = 0                     # half the chips have no usable optical data
+    torch.manual_seed(0)
+    model = build_model(cfg); model.train()
+    loss, _ = PMGSTLoss(cfg.loss)(model(b), b, epoch=0)
+    loss.backward()
+    total = torch.sqrt(sum((p.grad.double() ** 2).sum() for p in model.parameters() if p.grad is not None))
+    assert torch.isfinite(total) and total < 1e3, float(total)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..config import Config
 from ..data.formats import DEM_CHANNELS, DEM_STATS, IDX_SLOPE
@@ -72,7 +73,10 @@ class DLBaseline(nn.Module):
         f = self.s2_enc(x.flatten(0, 1))
         out = []
         for k, a in enumerate(f):
-            a = a.view(B, 2, *a.shape[1:])
+            # zero the features of invalid (cloud / dropped) S2: a GroupNorm on a constant-zero input amplifies gradients
+            # ~300x per layer (1e21 over the encoder) and the global grad-clip then freezes every other weight
+            pres = (F.interpolate(valid.flatten(0, 1), size=a.shape[-2:], mode="area") >= 0.5).to(a.dtype)
+            a = (a * pres).view(B, 2, *a.shape[1:])
             out.append(self.change[k](torch.cat([a[:, 1], (a[:, 1] - a[:, 0]).abs()], 1)))
         return out
 

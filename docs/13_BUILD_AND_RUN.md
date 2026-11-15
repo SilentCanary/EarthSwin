@@ -46,7 +46,7 @@ pip install rasterio geopandas shapely pyproj earthengine-api
 ## 3. Verify everything works (10 minutes, no real data)
 
 ```bat
-python -m pytest tests -q                       :: 40 tests, CPU, ~1 min
+python -m pytest tests -q                       :: 44 tests, CPU, ~1 min
 python -m pmgst.profile_gpu --config configs/rtx3060.yaml
 ```
 `profile_gpu` prints the peak memory per batch size on **your** card. Use the largest batch that fits for `train.batch`
@@ -61,12 +61,18 @@ python -m pmgst.train --config configs/rtx3060_synth.yaml
 ## 4. Real data (the part that decides everything)
 
 1. **Labels** (see `03` Appendix A): get a polygon inventory of 2023 landslides + the footprint of the area it covers.
-2. **Export** from Earth Engine (pilot = Mandi + Kullu first, where the best inventory is):
+2. **Export** from Earth Engine (needs a Google account with Earth Engine and a Cloud project registered for it). Nothing is downloaded from a website:
+   Earth Engine writes GeoTIFFs to your Google Drive folder, and you download that folder.
    ```bat
-   python -m pmgst.data.gee_export --project YOUR_GEE_PROJECT --bbox 76.5 31.4 77.9 32.4 --year 2023 --folder pmgst_2023 --dry-run
-   python -m pmgst.data.gee_export --project YOUR_GEE_PROJECT --bbox 76.5 31.4 77.9 32.4 --year 2023 --folder pmgst_2023
+   pip install earthengine-api pyproj rasterio geopandas shapely
+   earthengine authenticate
+   :: pilot: one central tile (~0.2 GB), checks dataset IDs and bands before the big job
+   python -m pmgst.data.gee_export --project YOUR_GEE_PROJECT --bbox 76.5 31.4 77.9 32.4 --year 2023 --folder pmgst_2023 --max-tiles 1
+   :: full job: ONLY tiles that touch the labelled area (about 35 tiles = 7-8 GB for ~3,100 km2)
+   python -m pmgst.data.gee_export --project YOUR_GEE_PROJECT --extent labels/extent.gpkg --year 2023 --folder pmgst_2023
    ```
-   Download the Drive folder into `data\raw\`. The bbox is approximate: adjust it. Size is roughly 10–12 GB for both districts.
+   Do **not** export the whole Mandi+Kullu bounding box: it is 168 tiles (1,008 tasks, ~37 GB) and most of it has no labels.
+   Watch progress at https://code.earthengine.google.com/tasks, then download the Drive folder into `data\raw\`.
 3. **Chips:**
    ```bat
    python -m pmgst.data.chips --raw data/raw --out data/chips --labels labels/inventory.gpkg --label-extent labels/extent.gpkg --chip 128 --ctx 64
@@ -104,6 +110,10 @@ python -m pmgst.train --config configs/rtx3060.yaml --set model.arch=utae  train
 `evaluate` works on all of them (`python -m pmgst.evaluate --ckpt runs/b3_unet/best.pt`). Phase 1 passes only if PMGST-Net-D beats the best of these
 by the margin in `02` section 7 (+3 F1, or equal F1 with better calibration and cloud robustness). B6 (foundation model) is not built.
 
+Training now logs `grad_norm_med` / `grad_norm_max` per epoch in `metrics.jsonl` and prints `[warn] gradient norm ...` if it exceeds 1e4.
+That warning means a layer is exploding and the global clip is freezing every other weight (a flat loss and a constant val AP are the symptoms).
+It happened once: the siamese baseline's optical encoder on cloudy/dropped chips (fixed by masking invalid S2 features; regression test in `tests/test_baselines.py`).
+
 Cloud-robust metric (no optical at all): `python -m pmgst.evaluate --ckpt runs/pmgst_d_v1/best.pt --drop s2`. `--drop s1` removes radar.
 
 Unseen-district test (docs/07, "unseen-district F1 drop"): build chips per district with `--region mandi` / `--region kullu`, put both in one index, then
@@ -127,7 +137,7 @@ One `.npz` per chip, documented at the top of `pmgst/data/formats.py`. Physical 
 
 ## 8. Honest status — read this before trusting any number
 
-* **Everything above is verified on synthetic data only** (40 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
+* **Everything above is verified on synthetic data only** (44 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
 * The synthetic benchmark proves the code learns and that blocks respond sensibly (see §9), not that they help on real terrain.
 * **Not yet measured:** GPU memory/speed on your RTX 3060 (run `profile_gpu`); `gee_export.py` against the live Earth Engine API (dataset IDs may need a tweak); `xai.py` on a trained real model.
 * Known simplifications: S1 layover/shadow not masked (needs local incidence angle); no S1 terrain flattening; lithology = soil-texture class until you get GSI geology; roads optional; normalisation constants are fixed (`models/pmgst_net.py`) rather than fitted on training folds — replace once real data exists.

@@ -122,7 +122,7 @@ def train(cfg: Config) -> dict:
     train_loader, val_loader = make_loader(tr, sampler, cfg, device), eval_loader(va, cfg, device)
     for epoch in range(cfg.train.epochs):
         model.train(); t0 = time.time()
-        agg, k = {}, 0
+        agg, k, gnorms, warned = {}, 0, [], False
         opt.zero_grad(set_to_none=True)
         for step, batch in enumerate(train_loader):
             batch = to_device(batch, device)
@@ -135,8 +135,17 @@ def train(cfg: Config) -> dict:
             if (step + 1) % cfg.train.accum == 0:
                 if scaler:
                     scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.clip_grad)
-                (scaler.step(opt), scaler.update()) if scaler else opt.step()
+                gnorm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.clip_grad))
+                if math.isfinite(gnorm):
+                    gnorms.append(gnorm)
+                    if gnorm > 1e4 and not warned:
+                        print(f"[warn] gradient norm {gnorm:.2g}: global clipping will freeze every other weight "
+                              f"(some layer is exploding, e.g. GroupNorm on constant input)"); warned = True
+                    (scaler.step(opt), scaler.update()) if scaler else opt.step()
+                else:
+                    print(f"[warn] non-finite gradient at epoch {epoch} step {step}, update skipped")
+                    if scaler:
+                        scaler.update()
                 opt.zero_grad(set_to_none=True); sched.step()
             if cfg.model.use_memory:
                 pos = (batch["label"] == 1).flatten(1).any(1)
@@ -151,6 +160,7 @@ def train(cfg: Config) -> dict:
         tr_stats = {kk: v / max(k, 1) for kk, v in agg.items()}
         val = evaluate(model, val_loader, cfg, device, dtype)
         rec = dict(epoch=epoch, time=round(time.time() - t0, 1), lr=sched.get_last_lr()[0],
+                   grad_norm_med=round(float(np.median(gnorms)), 3) if gnorms else None, grad_norm_max=round(max(gnorms), 3) if gnorms else None,
                    **{f"train_{a}": round(b, 4) for a, b in tr_stats.items()},
                    **{f"val_{a}": (round(b, 4) if isinstance(b, float) else b) for a, b in val.items() if not a.startswith("_")})
         history.append(rec); log.write(json.dumps(rec) + "\n"); log.flush()
