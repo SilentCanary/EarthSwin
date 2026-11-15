@@ -27,7 +27,8 @@ TEMPORAL_DIR = os.path.join(
     PROJECT_DIR, "dataset", "EarthSentinel_2016", "temporal_dataset"
 )
 
-BALANCED_CSV = os.path.join(TEMPORAL_DIR, "balanced_diagnostic.csv")
+BALANCED_CSV = os.path.join(TEMPORAL_DIR, "train_balanced.csv")
+TRAIN_ORIGINAL_CSV = os.path.join(TEMPORAL_DIR, "train_original.csv")
 VAL_ORIGINAL_CSV = os.path.join(TEMPORAL_DIR, "val.csv")
 TEST_ORIGINAL_CSV = os.path.join(TEMPORAL_DIR, "test.csv")
 
@@ -42,7 +43,7 @@ EXPECTED_NEGATIVES = 72
 
 sys.path.insert(0, MODELS_DIR)
 
-from earthswin import EarthSwin
+from earthswin_model import EarthSwin
 from graph_dataset import GraphTrainingDataset
 from train_earthswin import forward_group, DEVICE
 
@@ -90,8 +91,8 @@ def validate_csv(df):
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors="raise").astype(int)
 
-    if not set(df["split"].unique()).issubset({"val", "test"}):
-        raise ValueError("Split must contain only val and test.")
+    if not set(df["split"].unique()).issubset({"train", "val", "test"}):
+        raise ValueError("Split must contain only train, val, or test.")
 
     if not set(df["label"].unique()).issubset({0, 1}):
         raise ValueError("Labels must be 0 or 1.")
@@ -476,28 +477,28 @@ def main():
 
     model = load_model()
 
-    # Validation inference.
-    val_predictions = collect_predictions(
-        model,
-        diagnostic_df,
-        "val",
-        VAL_ORIGINAL_CSV,
-    )
+    original_csv_by_split = {
+        "train": TRAIN_ORIGINAL_CSV,
+        "val": VAL_ORIGINAL_CSV,
+        "test": TEST_ORIGINAL_CSV,
+    }
 
-    # Test inference.
-    test_predictions = collect_predictions(
-        model,
-        diagnostic_df,
-        "test",
-        TEST_ORIGINAL_CSV,
-    )
+    predictions_by_split = {}
+
+    for split_name in diagnostic_df["split"].unique():
+        predictions_by_split[split_name] = collect_predictions(
+            model,
+            diagnostic_df,
+            split_name,
+            original_csv_by_split[split_name],
+        )
 
     # --------------------------------------------------------
     # VERIFY EXACTLY 96 PREDICTIONS
     # --------------------------------------------------------
 
     all_predictions = pd.concat(
-        [val_predictions, test_predictions],
+        predictions_by_split.values(),
         ignore_index=True,
     )
 
@@ -510,13 +511,18 @@ def main():
         raise RuntimeError("Duplicate predictions detected.")
 
     # --------------------------------------------------------
-    # THRESHOLD SELECTION ON VALIDATION ONLY
+    # THRESHOLD SELECTION ON VALIDATION WHEN AVAILABLE.
     # --------------------------------------------------------
 
-    if val_predictions.empty:
-        raise RuntimeError("Validation split is empty.")
+    threshold_df = predictions_by_split.get(
+        "val",
+        predictions_by_split.get("train", pd.DataFrame()),
+    )
 
-    if val_predictions["label"].nunique() < 2:
+    if threshold_df.empty:
+        raise RuntimeError("No split is available for threshold selection.")
+
+    if threshold_df["label"].nunique() < 2:
 
         warnings.warn(
             "Validation has only one class. "
@@ -528,7 +534,7 @@ def main():
 
     else:
 
-        sweep_df = threshold_sweep(val_predictions)
+        sweep_df = threshold_sweep(threshold_df)
 
         best_row = sweep_df.loc[
             sweep_df["f1"].idxmax()
@@ -548,27 +554,12 @@ def main():
     # METRICS
     # --------------------------------------------------------
 
-    val_metrics = calculate_metrics(
-        val_predictions,
-        best_threshold,
-    )
-
-    test_metrics = calculate_metrics(
-        test_predictions,
-        best_threshold,
-    )
-
     combined_metrics = calculate_metrics(
         all_predictions,
         best_threshold,
     )
 
-    for df in [
-        val_predictions,
-        test_predictions,
-        all_predictions,
-    ]:
-
+    for df in list(predictions_by_split.values()) + [all_predictions]:
         df["predicted_label"] = (
             df["probability"] >= best_threshold
         ).astype(int)
@@ -577,33 +568,29 @@ def main():
     # SAVE RESULTS
     # --------------------------------------------------------
 
-    val_predictions.to_csv(
-        os.path.join(OUTPUT_DIR, "val_predictions.csv"),
-        index=False,
-    )
-
-    test_predictions.to_csv(
-        os.path.join(OUTPUT_DIR, "test_predictions.csv"),
-        index=False,
-    )
+    for split_name, predictions in predictions_by_split.items():
+        predictions.to_csv(
+            os.path.join(OUTPUT_DIR, f"{split_name}_predictions.csv"),
+            index=False,
+        )
 
     all_predictions.to_csv(
-        os.path.join(OUTPUT_DIR, "all_96_predictions.csv"),
+        os.path.join(OUTPUT_DIR, "all_diagnostic_predictions.csv"),
         index=False,
     )
 
     metrics_output = {
-        "threshold_selected_on": "validation only",
-        "threshold": best_threshold,
-        "expected_entries": 96,
-        "actual_entries": len(all_predictions),
-        "validation": val_metrics,
-        "test": test_metrics,
-        "combined_96_entry_summary": combined_metrics,
-        "note": (
-            "Use test metrics as the held-out result. "
-            "The combined summary is descriptive."
+        "threshold_selected_on": (
+            "validation" if "val" in predictions_by_split else "train"
         ),
+        "threshold": best_threshold,
+        "expected_entries": EXPECTED_ROWS,
+        "actual_entries": len(all_predictions),
+        "splits": {
+            split_name: calculate_metrics(predictions, best_threshold)
+            for split_name, predictions in predictions_by_split.items()
+        },
+        "combined_diagnostic_summary": combined_metrics,
     }
 
     with open(
@@ -614,12 +601,16 @@ def main():
 
         json.dump(metrics_output, f, indent=4)
 
-    print_metrics("VALIDATION METRICS", val_metrics)
-    print_metrics("TEST METRICS", test_metrics)
-    print_metrics("COMBINED 96-ENTRY SUMMARY", combined_metrics)
+    for split_name, predictions in predictions_by_split.items():
+        print_metrics(
+            f"{split_name.upper()} METRICS",
+            calculate_metrics(predictions, best_threshold),
+        )
+
+    print_metrics("COMBINED DIAGNOSTIC SUMMARY", combined_metrics)
 
     print("\n======================================")
-    print("SUCCESS: EXACTLY 96 ENTRIES EVALUATED")
+    print("SUCCESS: ALL DIAGNOSTIC ENTRIES EVALUATED")
     print("======================================")
 
     print("Total predictions:", len(all_predictions))
