@@ -47,7 +47,7 @@ def rain_features(daily: np.ndarray) -> np.ndarray:
     return np.array([daily.max(), np.convolve(daily, np.ones(3), "valid").max(), daily[-7:].sum(), daily[-30:].sum()], np.float32)
 
 
-def save_chip(path, chip: dict) -> None:
+def save_chip(path, chip: dict, compress: bool = False) -> None:
     out = {}
     for k in CHIP_KEYS:
         a = np.asarray(chip[k])
@@ -58,7 +58,7 @@ def save_chip(path, chip: dict) -> None:
         elif k in ("s2_valid", "s1_valid", "ctx_valid", "lith", "water", "label"):
             a = a.astype(np.uint8)
         out[k] = a
-    np.savez(path, **out)
+    (np.savez_compressed if compress else np.savez)(path, **out)
 
 
 def load_chip(path) -> dict:

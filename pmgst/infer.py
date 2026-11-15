@@ -73,6 +73,33 @@ def predict(model, ds: ChipDataset, cfg, device, dtype, full_graph: bool = True)
     return np.stack(P), np.stack(U)
 
 
+def predict_ensemble(ckpts, split="test", root=None, full_graph=True, drop=None, device=None):
+    """ckpts: path or comma-separated paths. Every model scores the same chips; probabilities are averaged (raw and calibrated
+    separately), uncertainty is averaged. Returns dict(ds, cfg, p_raw, p_cal, u, thr_raw, thr_cal, calibs)."""
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    paths = [c.strip() for c in str(ckpt_list(ckpts)).split(",") if c.strip()]
+    P, PC, U, thr_r, thr_c, calibs, ds, cfg0 = [], [], [], [], [], [], None, None
+    for k, path in enumerate(paths):
+        model, cfg, calib, thr = load_model(path, device)
+        if root:
+            cfg.data.root = root
+        if ds is None:
+            ds, cfg0 = ChipDataset(cfg, split, augment=False, drop=drop), cfg
+        _, dtype, _ = amp_setup(cfg, device)
+        p, u = predict(model, ds, cfg, device, dtype, full_graph)
+        P.append(p); PC.append(apply_calibration(p, calib)); U.append(u)
+        thr_r.append(thr); thr_c.append(float(apply_calibration(np.array([thr]), calib)[0])); calibs.append(list(calib))
+        del model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+    return dict(ds=ds, cfg=cfg0, p_raw=np.mean(P, 0), p_cal=np.mean(PC, 0), u=np.mean(U, 0),
+                thr_raw=float(np.mean(thr_r)), thr_cal=float(np.mean(thr_c)), calibs=calibs, n_models=len(paths))
+
+
+def ckpt_list(c):
+    return ",".join(c) if isinstance(c, (list, tuple)) else c
+
+
 def extract_objects(p: np.ndarray, u: np.ndarray, thr: float, min_px: int = 9):
     """Threshold -> 3x3 opening -> connected components -> drop < min_px. Returns label image + attribute list."""
     m = ndi.binary_opening(p >= thr, structure=np.ones((3, 3), bool))
@@ -121,16 +148,11 @@ def save_raster(path: Path, arr: np.ndarray, origin, res=10.0, crs="EPSG:32643")
 
 def run_region(ckpt, split="test", out_dir="outputs/run", full_graph=True, taus=(0.25, 0.5, 0.75), u_max=0.5,
                overrides=None, device=None):
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, cfg, calib, thr = load_model(ckpt, device)
-    if overrides:
-        cfg.data.root = overrides.get("root", cfg.data.root)
-    _, dtype, _ = amp_setup(cfg, device)
-    ds = ChipDataset(cfg, split, augment=False)
+    """ckpt may be several comma-separated checkpoints (ensemble: averaged calibrated probability)."""
+    E = predict_ensemble(ckpt, split, (overrides or {}).get("root"), full_graph, device=device)
+    ds, cfg, p, u, thr_c = E["ds"], E["cfg"], E["p_cal"], E["u"], E["thr_cal"]
+    calib = E["calibs"][0]
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    p_raw, u = predict(model, ds, cfg, device, dtype, full_graph)
-    p = apply_calibration(p_raw, calib)
-    thr_c = float(apply_calibration(np.array([thr]), calib)[0])
     csz = cfg.data.chip
     table, feats, alerts = [], [], []
     for i, r in enumerate(ds.rows):
@@ -152,7 +174,7 @@ def run_region(ckpt, split="test", out_dir="outputs/run", full_graph=True, taus=
     (out / "alerts.json").write_text(json.dumps(alerts, indent=1))
     pm, org = mosaic(ds.rows, p, csz); um, _ = mosaic(ds.rows, u, csz)
     save_raster(out / "probability", pm, org); save_raster(out / "uncertainty", um, org)
-    print(f"[infer] {len(ds)} chips | {len(feats)} objects | alerts {len(alerts)} | calib a={calib[0]:.2f} b={calib[1]:.2f} thr={thr_c:.3f} -> {out}")
+    print(f"[infer] {E['n_models']} model(s) | {len(ds)} chips | {len(feats)} objects | alerts {len(alerts)} | calib a={calib[0]:.2f} b={calib[1]:.2f} thr={thr_c:.3f} -> {out}")
     return dict(p=p, u=u, table=table, ds=ds)
 
 

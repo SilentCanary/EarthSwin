@@ -70,3 +70,18 @@ def area_resample(a: np.ndarray, out: int, w: np.ndarray | None = None) -> np.nd
         return blk(a)
     num, den = blk(a * w), blk(w)
     return np.where(den > 0, num / np.maximum(den, 1e-6), 0.0)
+
+
+def sar_geometry_mask(slope_deg, asp_x, asp_y, look_az_deg: float, inc_deg: float = 39.0, margin_deg: float = 3.0):
+    """True where Sentinel-1 backscatter is unusable because of layover or radar shadow (approximate, geometry only).
+
+    look_az_deg: azimuth the radar looks TOWARD (clockwise from north). Sentinel-1 at ~32 N: ascending ~ 78, descending ~ 282.
+    inc_deg: ellipsoid incidence angle (IW swath 29-46, 39 = mid-swath). asp_x/asp_y: downslope direction (E, N), as in the chip format.
+    Slope tilt toward the sensor a_r = atan(tan(slope) * cos(angle between downslope and the toward-sensor direction)).
+      layover : a_r >= inc - margin           shadow : a_r <= -(90 - inc) + margin
+    """
+    phi = np.radians(look_az_deg)
+    toward = (-np.sin(phi), -np.cos(phi))                       # horizontal unit vector pointing at the sensor (E, N)
+    c = asp_x * toward[0] + asp_y * toward[1]                   # + : slope faces the sensor
+    a_r = np.degrees(np.arctan(np.tan(np.radians(slope_deg)) * c))
+    return (a_r >= inc_deg - margin_deg) | (a_r <= -(90.0 - inc_deg) + margin_deg)

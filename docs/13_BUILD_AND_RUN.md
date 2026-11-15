@@ -46,7 +46,7 @@ pip install rasterio geopandas shapely pyproj earthengine-api
 ## 3. Verify everything works (10 minutes, no real data)
 
 ```bat
-python -m pytest tests -q                       :: 44 tests, CPU, ~1 min
+python -m pytest tests -q                       :: 51 tests, CPU, ~1 min
 python -m pmgst.profile_gpu --config configs/rtx3060.yaml
 ```
 `profile_gpu` prints the peak memory per batch size on **your** card. Use the largest batch that fits for `train.batch`
@@ -122,6 +122,17 @@ Unseen-district test (docs/07, "unseen-district F1 drop"): build chips per distr
 Hard negatives: the sampler seeds 50% of clusters on landslide chips, 20% on steep landslide-free chips (slope > 15 deg on at least 20% of the chip), the rest random.
 `train.hard_frac=0` turns it off. The steepness table is cached as `hard_neg_15_20.json` in the chip folder.
 
+## 5c. Real-data tooling (all tested on fabricated tiles / synthetic chips; see docs/14 for the run order)
+
+| Tool | What it does |
+|---|---|
+| `pmgst.data.chips` | tiles + label polygons -> chips. `--lith-vector/--lith-col` geology, `--orbit` layover/shadow mask on S1, `--compress`, `--delete-raw`, `--append` (batch by batch) |
+| `pmgst.data.qa` | NaN/range/label checks, folds with too few landslides, DEM stats vs model, **label-alignment test**, `--png` montage |
+| `data.fit_norm=true` | DEM normalisation fitted on training chips, stored in the checkpoint |
+| `pmgst.ablate` | variants x seeds -> `ablation.md` (mean ± sd), resumable |
+| `evaluate/infer --ckpt a.pt,b.pt` | ensemble: averaged calibrated probability |
+| `pmgst.data.l4s` + `configs/l4s.yaml` | Landslide4Sense -> chips, for training on real scars before Himachal labels exist |
+
 ## 6. Data format (what the model eats)
 
 One `.npz` per chip, documented at the top of `pmgst/data/formats.py`. Physical units on disk; the model normalises.
@@ -137,10 +148,10 @@ One `.npz` per chip, documented at the top of `pmgst/data/formats.py`. Physical 
 
 ## 8. Honest status — read this before trusting any number
 
-* **Everything above is verified on synthetic data only** (44 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
+* **Everything above is verified on synthetic data only** (51 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
 * The synthetic benchmark proves the code learns and that blocks respond sensibly (see §9), not that they help on real terrain.
-* **Not yet measured:** GPU memory/speed on your RTX 3060 (run `profile_gpu`); `gee_export.py` against the live Earth Engine API (dataset IDs may need a tweak); `xai.py` on a trained real model.
-* Known simplifications: S1 layover/shadow not masked (needs local incidence angle); no S1 terrain flattening; lithology = soil-texture class until you get GSI geology; roads optional; normalisation constants are fixed (`models/pmgst_net.py`) rather than fitted on training folds — replace once real data exists.
+* **Not yet run against real inputs:** `gee_export.py` (Earth Engine dataset IDs may need a tweak); `chips.py` on real GEE tiles and real polygons; the Landslide4Sense adapter on the real `.h5` files (keys, band order and scaling are assumed and auto-checked, run `--inspect`); the S1 layover/shadow thresholds; `xai.py`/`serve.py` on a trained real model. GPU speed was measured on synthetic data only (full PMGST ~13 s/epoch, 82 chips).
+* Known simplifications: S1 layover/shadow masked from DEM geometry with a nominal look direction and a fixed 39 deg incidence (approximate); no S1 terrain flattening; lithology = soil-texture class until you get GSI geology; roads optional; DEM normalisation is fitted on the training chips only when `data.fit_norm=true` (default off for synthetic data).
 * Phase 2 (early warning, causal, forecast horizon) and Phase 3 (self-training) are **not** implemented; they need dated events and a trained detector first (`11_…`).
 
 ## 9. Synthetic sanity benchmark (reference, CPU, 144 chips, 22 epochs)

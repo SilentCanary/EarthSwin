@@ -1,0 +1,28 @@
+# Landslide4Sense chips (pmgst.data.l4s): single post-event optical + DEM, no S1, no neighbours.
+# Graph, pyramid and S1 are off because the data has none of those inputs. Same recipe otherwise.
+data:
+  root: data/l4s_chips
+  chip: 128
+  ctx: 64
+  t_max: 2
+  buffer_m: 1280      # drops train patches whose index is adjacent to val/test ones (leakage proxy)
+  num_workers: 2
+  fit_norm: true
+  p_drop_s2: 0.0      # S2 is the only optical input: never drop it
+model:
+  dims: [48, 96, 192, 384]
+  depths: [2, 2, 2, 2]
+  heads: [3, 6, 12, 24]
+  window: 8
+  use_s1: false
+  use_pyramid: false
+  use_graph: false
+train:
+  out_dir: runs/l4s_pmgst
+  epochs: 60
+  batch: 8
+  accum: 2
+  lr: 0.0003
+  amp: auto
+  patience: 12
+  hard_frac: 0.0

@@ -108,6 +108,12 @@ def train(cfg: Config) -> dict:
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
     model = build_model(cfg).to(device)
+    if cfg.data.fit_norm:
+        from .data.stats import fit_dem_stats
+        mu, sd = fit_dem_stats(tr)
+        model.dem_mu.copy_(torch.from_numpy(mu).view(1, -1, 1, 1)); model.dem_sd.copy_(torch.from_numpy(sd).view(1, -1, 1, 1))
+        (out_dir / "norm_stats.json").write_text(json.dumps(dict(dem_mu=mu.tolist(), dem_sd=sd.tolist())))
+        print("[norm] DEM mean/std fitted on training chips")
     print(f"[model] {model.n_params() / 1e6:.2f} M params")
     crit = PMGSTLoss(cfg.loss)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd)

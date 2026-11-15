@@ -7,6 +7,7 @@ data:
   t_max: 8           # S1 dates per sample
   buffer_m: 1280
   num_workers: 2     # Windows: keep small; 0 if you see worker errors
+  fit_norm: true     # fit DEM normalisation on the training chips (real terrain)
 model:
   dims: [48, 96, 192, 384]
   depths: [2, 2, 2, 2]

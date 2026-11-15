@@ -28,6 +28,7 @@ class DataCfg:
     p_drop_s2: float = 0.3            # modality dropout (block 5 training trick)
     p_drop_s1: float = 0.2            # per S1 date
     num_workers: int = 2
+    fit_norm: bool = False            # fit DEM normalisation (mean/std per channel) on the training chips (real data: true)
     holdout_region: str = ""          # "" = spatial-block folds; else all chips of this region (district) are the test set
 
 

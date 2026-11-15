@@ -8,6 +8,11 @@
   ignore (255): unmapped is not "no landslide". A 1-pixel ring outside each polygon is ignore too.
 * Chips whose labelled area is empty are skipped.  --neg-keep < 1 randomly drops chips without landslides to save disk.
 * S1: zeros from the export are no-data -> validity mask (audit C2 fix); dates are the 12-day bin centres.
+  Layover / radar shadow (from the DEM and the orbit's look direction) are added to the invalid mask (--orbit must match the export).
+* Geology: --lith-vector geology.gpkg --lith-col LITHO rasterises polygons into the lith channel (0 = not covered); the class table is
+  written to lith_classes.json. Without it the channel is the soil-texture class from the export.
+* Disk: --compress shrinks every chip ~2-3x; --delete-raw removes a tile's GeoTIFFs once its chips are written.
+  python -m pmgst.data.chips --raw data/raw --out data/chips --labels ... --compress --delete-raw --append   # batch by batch
 """
 from __future__ import annotations
 
@@ -18,11 +23,12 @@ import re
 import numpy as np
 from scipy import ndimage as ndi
 
-from .formats import rain_features, save_chip, write_index
+from .formats import rain_features, read_index, save_chip, write_index
 from .splits import block_ids
-from .terrain import area_resample, d8_flow_accumulation, terrain_channels
+from .terrain import area_resample, d8_flow_accumulation, sar_geometry_mask, terrain_channels
 
 BIN_DAYS, N_BINS = 12, 15
+LOOK_AZ = {"ASCENDING": 78.0, "DESCENDING": 282.0}      # azimuth the radar looks toward, ~32 N
 
 
 def _rio():
@@ -63,8 +69,28 @@ def rasterize_labels(gdf, transform, shape, crs, extent=None):
     return out
 
 
+def lith_table(gdf, col: str, n_lith: int = 13):
+    """Class value -> id (1..n_lith-1; 0 = not covered). The most extensive classes get their own id, the tail is merged into the last."""
+    area = gdf.assign(_a=gdf.geometry.area).groupby(col)["_a"].sum().sort_values(ascending=False)
+    keep = list(area.index[: n_lith - 2])
+    table = {str(v): i + 1 for i, v in enumerate(keep)}
+    for v in area.index[n_lith - 2:]:
+        table[str(v)] = n_lith - 1
+    return table
+
+
+def rasterize_lith(gdf, col, table, transform, shape, crs):
+    from rasterio import features
+    g = gdf.to_crs(crs)
+    shapes = [(geom, table[str(v)]) for geom, v in zip(g.geometry, g[col]) if geom is not None and not geom.is_empty]
+    if not shapes:
+        return np.zeros(shape, np.uint8)
+    return features.rasterize(shapes, out_shape=shape, transform=transform, fill=0, dtype="uint8")
+
+
 def build_tile(raw: Path, x0: int, y1: int, labels, extent, roads, chip: int, ctx: int, n_scales: int, buffer_m: float,
-               neg_keep: float, rng, out_chips: Path, region: str):
+               neg_keep: float, rng, out_chips: Path, region: str, lith_gdf=None, lith_col=None, lith_map=None,
+               orbit: str | None = "ASCENDING", incidence: float = 39.0, compress: bool = False):
     rio = _rio()
     nm = lambda k: raw / f"{k}_x{x0}_y{y1}.tif"
     post_raw, tf, res, crs = read_tif(nm("s2post")); pre_raw, _, _, _ = read_tif(nm("s2pre"))
@@ -76,8 +102,7 @@ def build_tile(raw: Path, x0: int, y1: int, labels, extent, roads, chip: int, ct
     s1_raw, _, _, _ = read_tif(nm("s1"))
     vv, vh = s1_raw[:N_BINS].astype(np.float32) / 100.0, s1_raw[N_BINS:].astype(np.float32) / 100.0
     ok = (s1_raw[:N_BINS] != 0) & (s1_raw[N_BINS:] != 0) & (vv > -35) & (vv < 10) & (vh > -40) & (vh < 5)   # zeros = no data
-    s1 = np.stack([vv, vh], 1) * ok[:, None]                                            # [T,2,H,W]
-    s1v = ok[:, None].astype(np.uint8)
+    s1_raw_ok = ok
     s1_dt = (np.arange(N_BINS) * BIN_DAYS + BIN_DAYS / 2).astype(np.float32)
     dem_raw, _, dres, _ = read_tif(nm("dem"))
     z = dem_raw[0].astype(np.float64)
@@ -86,6 +111,11 @@ def build_tile(raw: Path, x0: int, y1: int, labels, extent, roads, chip: int, ct
     f = int(round(dres / res))
     dem = ndi.zoom(ch, (1, f, f), order=1, mode="nearest", grid_mode=True) if f > 1 else ch
     assert dem.shape[1:] == (H, W), f"DEM grid {dem.shape} does not match S2 grid {(H, W)}"
+    if orbit:                                                                            # layover / shadow -> invalid S1
+        geo_bad = sar_geometry_mask(dem[1], dem[2], dem[3], LOOK_AZ[orbit], incidence)
+        s1_raw_ok = s1_raw_ok & ~geo_bad[None]
+    s1 = np.stack([vv, vh], 1) * s1_raw_ok[:, None]                                      # [T,2,H,W]
+    s1v = s1_raw_ok[:, None].astype(np.uint8)
     acc = d8_flow_accumulation(z, dres)
     channel = acc * dres * dres >= 1e6                                                   # >= 1 km2 upstream area
     river_d = ndi.distance_transform_edt(~channel) * dres
@@ -103,6 +133,8 @@ def build_tile(raw: Path, x0: int, y1: int, labels, extent, roads, chip: int, ct
     st, _, _, _ = read_tif(nm("static"))
     water = (st[0] == 80).astype(np.uint8)
     lith = np.clip(st[1], 0, 12).astype(np.uint8)
+    if lith_gdf is not None:
+        lith = rasterize_lith(lith_gdf, lith_col, lith_map, tf, (H, W), crs)
     label_full = rasterize_labels(labels, tf, (H, W), crs, extent) if labels is not None else np.zeros((H, W), np.uint8)
 
     px_buf = int(round(buffer_m / res)); csz_m = chip * res
@@ -136,7 +168,7 @@ def build_tile(raw: Path, x0: int, y1: int, labels, extent, roads, chip: int, ct
             meta = np.array([cx, cy, d[0].mean(), np.sin(beta) * ax / nrm, np.sin(beta) * ay / nrm, np.cos(beta),
                              river_d10[sl].mean(), road_d10[sl].mean(), 0.0, rain[2] / 100.0], np.float32)
             cid = f"{region}_x{x0}_y{y1}_{gy:02d}{gx:02d}"
-            save_chip(out_chips / f"{cid}.npz", dict(
+            save_chip(out_chips / f"{cid}.npz", compress=compress, chip=dict(
                 s2=s2[(slice(None), slice(None)) + sl], s2_valid=s2v[(slice(None), slice(None)) + sl],
                 s1=s1[(slice(None), slice(None)) + sl], s1_valid=s1v[(slice(None), slice(None)) + sl], s1_dt=s1_dt,
                 dem=d, lith=lith[sl], water=water[sl], rain=rain, ctx_s2=np.stack(c_s2), ctx_valid=np.stack(c_v),
@@ -158,19 +190,46 @@ def main():
     ap.add_argument("--neg-keep", type=float, default=1.0)
     ap.add_argument("--region", default="hp"); ap.add_argument("--block-m", type=float, default=10_000.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--lith-vector", default=None, help="geology polygons (GSI/other): rasterised into the lith channel")
+    ap.add_argument("--lith-col", default=None, help="attribute column holding the rock/soil class of --lith-vector")
+    ap.add_argument("--n-lith", type=int, default=13)
+    ap.add_argument("--orbit", default="ASCENDING", choices=["ASCENDING", "DESCENDING"], help="must match the S1 export")
+    ap.add_argument("--s1-incidence", type=float, default=39.0)
+    ap.add_argument("--no-sar-mask", action="store_true", help="keep layover/shadow pixels valid")
+    ap.add_argument("--compress", action="store_true", help="np.savez_compressed chips (about 2-3x smaller)")
+    ap.add_argument("--append", action="store_true", help="add to an existing --out (index.csv + lith_classes.json are merged), so tiles can be processed in batches")
+    ap.add_argument("--delete-raw", action="store_true", help="delete each tile's GeoTIFFs after its chips are written")
     a = ap.parse_args()
     import geopandas as gpd
     raw, out = Path(a.raw), Path(a.out); (out / "chips").mkdir(parents=True, exist_ok=True)
     labels = gpd.read_file(a.labels) if a.labels else None
     extent = gpd.read_file(a.label_extent) if a.label_extent else None
     roads = gpd.read_file(a.roads) if a.roads else None
+    lith_gdf = lith_map = None
+    if a.lith_vector:
+        if not a.lith_col:
+            raise SystemExit("--lith-col is required with --lith-vector")
+        lith_gdf = gpd.read_file(a.lith_vector)
+        import json
+        prev = out / "lith_classes.json"
+        lith_map = json.loads(prev.read_text()) if (a.append and prev.exists()) else lith_table(lith_gdf, a.lith_col, a.n_lith)
+        (out / "lith_classes.json").write_text(json.dumps(lith_map, indent=1, ensure_ascii=False))
+        print(f"[lith] {len(lith_map)} source classes -> ids 1..{max(lith_map.values())} (lith_classes.json)")
     rng = np.random.default_rng(a.seed)
     tiles = find_tiles(raw); print(f"{len(tiles)} tiles")
     rows = []
     for k, (x0, y1) in enumerate(tiles):
-        r = build_tile(raw, x0, y1, labels, extent, roads, a.chip, a.ctx, a.n_scales, a.buffer, a.neg_keep, rng, out / "chips", a.region)
+        r = build_tile(raw, x0, y1, labels, extent, roads, a.chip, a.ctx, a.n_scales, a.buffer, a.neg_keep, rng, out / "chips", a.region,
+                       lith_gdf, a.lith_col, lith_map, None if a.no_sar_mask else a.orbit, a.s1_incidence, a.compress)
         rows += r
+        if a.delete_raw:
+            for f in raw.glob(f"*_x{x0}_y{y1}.tif"):
+                f.unlink()
         print(f"  tile {k + 1}/{len(tiles)} x{x0} y{y1}: {len(r)} chips ({sum(q['n_pos_px'] > 0 for q in r)} with landslides)")
+    if a.append and (out / "index.csv").exists():
+        new_ids = {r["chip_id"] for r in rows}
+        rows = [r for r in read_index(out / "index.csv") if r["chip_id"] not in new_ids] + rows
+        print(f"[append] index now {len(rows)} chips")
     blk = block_ids([r["x"] for r in rows], [r["y"] for r in rows], a.block_m)
     for r, b in zip(rows, blk):
         r["block"] = int(b)
