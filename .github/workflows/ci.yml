@@ -15,6 +15,6 @@ jobs:
       - name: Install (CPU torch + deps)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install numpy scipy pyyaml scikit-learn pytest tqdm rasterio geopandas shapely pyproj
+          pip install numpy scipy pyyaml scikit-learn pytest tqdm rasterio geopandas shapely pyproj h5py matplotlib
       - name: Tests
         run: python -m pytest tests -q
