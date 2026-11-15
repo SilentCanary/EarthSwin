@@ -68,3 +68,9 @@ Unseen-district test (docs/07): chip Mandi and Kullu with different `--region`, 
 * Phase-1 passes only if PMGST beats the best of B3/B4/B5 by the docs/07 margin (+3 F1, or equal F1 with better ECE and cloud robustness) and the `ablation.md` mean ± sd gaps exceed the seed spread.
 * Report block-bootstrap CIs (`evaluate` prints them). One test fold with few landslide blocks gives wide intervals; say so.
 * Everything before this step was verified on synthetic data. A drop from synthetic to real numbers is expected and is the real result.
+
+## Frontend
+
+`frontend/index.html` is a single self-contained page (zoomable Himachal map, architecture, status, API panel).
+Run `uvicorn pmgst.serve:app --port 8000` and open http://localhost:8000/ui/ . The map hotspots are a labelled
+simulation; only the "Connect your model" panel shows real model output (drop a chip `.npz`).

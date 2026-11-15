@@ -9,3 +9,4 @@ outputs/
 .pytest_cache/
 __pycache__/
 *.pt
+_to_delete/

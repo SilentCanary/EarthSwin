@@ -157,3 +157,17 @@ def test_l4s_adapter_and_training(tmp_path):
     from pmgst.train import train
     r = train(cfg)
     assert np.isfinite(r["best_ap"])
+
+
+def test_serve_lonlat_and_ui():
+    pytest.importorskip("fastapi"); pytest.importorskip("pyproj"); pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from pmgst import serve
+    lon, lat = serve.chip_lonlat([740000.0, 3600000.0])         # inside UTM 43N, ~Himachal
+    assert 75 < lon < 79 and 31 < lat < 33.5
+    assert serve.chip_lonlat([50.0, 20.0]) == (None, None)       # fake coordinates are not mapped
+    c = TestClient(serve.app)
+    assert c.get("/health").json()["status"] == "ok"
+    assert c.get("/health", headers={"Origin": "http://x"}).headers["access-control-allow-origin"] == "*"
+    r = c.get("/ui/")
+    assert r.status_code == 200 and "EarthSwin" in r.text
