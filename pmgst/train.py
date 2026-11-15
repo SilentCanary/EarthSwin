@@ -20,7 +20,7 @@ from .config import Config, load_config, to_dict
 from .data.dataset import ChipDataset, ClusterBatchSampler, collate, sweep_clusters, to_device
 from .losses import PMGSTLoss
 from .metrics import ObjectMetrics, PixelMetrics
-from .models.pmgst_net import PMGSTNet
+from .models.build import build_model
 
 
 def _worker_init(wid: int):
@@ -107,7 +107,7 @@ def train(cfg: Config) -> dict:
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
-    model = PMGSTNet(cfg).to(device)
+    model = build_model(cfg).to(device)
     print(f"[model] {model.n_params() / 1e6:.2f} M params")
     crit = PMGSTLoss(cfg.loss)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.wd)
@@ -118,7 +118,7 @@ def train(cfg: Config) -> dict:
         opt, lambda s: (s + 1) / max(warm, 1) if s < warm else 0.5 * (1 + math.cos(math.pi * (s - warm) / max(total_opt - warm, 1))) * 0.99 + 0.01)
     log = open(out_dir / "metrics.jsonl", "a")
     best, bad, history = -1.0, 0, []
-    sampler = ClusterBatchSampler(tr, cfg.train.batch, steps_ep, cfg.train.pos_frac, cfg.train.seed)
+    sampler = ClusterBatchSampler(tr, cfg.train.batch, steps_ep, cfg.train.pos_frac, cfg.train.seed, cfg.train.hard_frac)
     train_loader, val_loader = make_loader(tr, sampler, cfg, device), eval_loader(va, cfg, device)
     for epoch in range(cfg.train.epochs):
         model.train(); t0 = time.time()

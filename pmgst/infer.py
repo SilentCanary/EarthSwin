@@ -22,7 +22,7 @@ from .calibration import apply_calibration
 from .config import from_dict
 from .data.dataset import ChipDataset, collate, sweep_clusters, to_device
 from .data.formats import M_BLOCK
-from .models.pmgst_net import PMGSTNet
+from .models.build import build_model
 from .train import amp_setup, make_loader, pick_device
 
 LEVELS = ["LOW", "MODERATE", "HIGH", "VERY HIGH"]
@@ -32,7 +32,7 @@ def load_model(ckpt_path, device=None):
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ck = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg = from_dict(ck["cfg"])
-    model = PMGSTNet(cfg).to(device)
+    model = build_model(cfg).to(device)
     model.load_state_dict(ck["model"])
     model.eval()
     return model, cfg, tuple(ck.get("calib", (1.0, 0.0))), float(ck.get("thr", 0.5))

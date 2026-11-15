@@ -24,6 +24,7 @@
 | 13 XAI | `pmgst/xai.py` | Written; attention maps, Grad-CAM, IG, Shapley groups |
 | 14 Multi-objective loss | `pmgst/losses.py` | Tested; focal+Dice, physics, SupCon, EDL |
 | 15 Deployment | `pmgst/serve.py` | Minimal API; full Phase 3 loop is `11_…` |
+| Baselines B0-B2 / B3-B5 | `pmgst/baselines.py` / `pmgst/models/baselines_dl.py` | Tested; B6 foundation model not built |
 
 Deliberate departures from the diagram: the graph runs over **chips in a spatial cluster** (not 5 km weekly nodes); detection is **pixel-level at 10 m**; there is no block 10 (as in your diagram). Everything else follows `05`.
 
@@ -45,7 +46,7 @@ pip install rasterio geopandas shapely pyproj earthengine-api
 ## 3. Verify everything works (10 minutes, no real data)
 
 ```bat
-python -m pytest tests -q                       :: 32 tests, CPU, ~1 min
+python -m pytest tests -q                       :: 40 tests, CPU, ~1 min
 python -m pmgst.profile_gpu --config configs/rtx3060.yaml
 ```
 `profile_gpu` prints the peak memory per batch size on **your** card. Use the largest batch that fits for `train.batch`
@@ -92,6 +93,25 @@ python -m pmgst.train --config configs/rtx3060.yaml --set train.out_dir=runs/abl
 Keep a block only if val AP / F1 improves by about +1 point or robustness improves (docs `03` §3.3, `07`).
 Loss terms: `--set loss.lam_phys=0` / `loss.lam_con=0` / `loss.lam_unc=0`.
 
+## 5b. Deep baselines B3-B5 (docs/07) and evaluation modes
+
+Same data, same recipe, same evaluation. Only the architecture changes (`models/baselines_dl.py`):
+```bat
+python -m pmgst.train --config configs/rtx3060.yaml --set model.arch=unet  train.out_dir=runs/b3_unet   :: post S2 + DEM
+python -m pmgst.train --config configs/rtx3060.yaml --set model.arch=siam  train.out_dir=runs/b4_siam   :: pre/post S2 + S1 stats + DEM
+python -m pmgst.train --config configs/rtx3060.yaml --set model.arch=utae  train.out_dir=runs/b5_utae   :: + S1 time series, temporal attention
+```
+`evaluate` works on all of them (`python -m pmgst.evaluate --ckpt runs/b3_unet/best.pt`). Phase 1 passes only if PMGST-Net-D beats the best of these
+by the margin in `02` section 7 (+3 F1, or equal F1 with better calibration and cloud robustness). B6 (foundation model) is not built.
+
+Cloud-robust metric (no optical at all): `python -m pmgst.evaluate --ckpt runs/pmgst_d_v1/best.pt --drop s2`. `--drop s1` removes radar.
+
+Unseen-district test (docs/07, "unseen-district F1 drop"): build chips per district with `--region mandi` / `--region kullu`, put both in one index, then
+`--set data.holdout_region=kullu` at train time. All Kullu chips become the test set, train/val come from Mandi only (buffered).
+
+Hard negatives: the sampler seeds 50% of clusters on landslide chips, 20% on steep landslide-free chips (slope > 15 deg on at least 20% of the chip), the rest random.
+`train.hard_frac=0` turns it off. The steepness table is cached as `hard_neg_15_20.json` in the chip folder.
+
 ## 6. Data format (what the model eats)
 
 One `.npz` per chip, documented at the top of `pmgst/data/formats.py`. Physical units on disk; the model normalises.
@@ -107,7 +127,7 @@ One `.npz` per chip, documented at the top of `pmgst/data/formats.py`. Physical 
 
 ## 8. Honest status — read this before trusting any number
 
-* **Everything above is verified on synthetic data only** (32 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
+* **Everything above is verified on synthetic data only** (40 tests, CPU). On real Himachal data nothing has been trained yet, so there is no accuracy claim.
 * The synthetic benchmark proves the code learns and that blocks respond sensibly (see §9), not that they help on real terrain.
 * **Not yet measured:** GPU memory/speed on your RTX 3060 (run `profile_gpu`); `gee_export.py` against the live Earth Engine API (dataset IDs may need a tweak); `xai.py` on a trained real model.
 * Known simplifications: S1 layover/shadow not masked (needs local incidence angle); no S1 terrain flattening; lithology = soil-texture class until you get GSI geology; roads optional; normalisation constants are fixed (`models/pmgst_net.py`) rather than fitted on training folds — replace once real data exists.
@@ -124,6 +144,9 @@ Baselines are fitted on train and scored on the same val split.
 | B1 dNDVI threshold | 0.239 | |
 | B1 S1 backscatter change | 0.090 | |
 | B2 gradient boosting (all features) | 0.414 | |
+| B3 U-Net (post S2 + DEM) | 0.687 | 0.592 |
+| B4 siamese (pre/post S2 + S1 stats + DEM) | 0.581 | 0.667 |
+| B5 U-TAE-lite (+ S1 time series) | 0.618 | 0.529 |
 | PMGST full | 0.594 | 0.596 |
 | no physics | 0.580 | 0.588 |
 | no graph | 0.586 | 0.576 |
@@ -131,8 +154,8 @@ Baselines are fitted on train and scored on the same val split.
 | S2 only | 0.640 | 0.655 |
 | S1 only | 0.097 | 0.186 |
 
-How to read it: the model clearly beats every cheap baseline, and S1 alone is weak, which is what the synthetic world was built to do.
-The differences between full / no-physics / no-graph / no-pyramid / S2-only are about 0.05 AP, which is inside what one seed on a 30-chip val split can move.
-**So this table does not show that pyramid, graph or physics help.** On synthetic data it only shows the switches work and nothing is broken.
-The real ablation is section 5 on real Himachal chips, with 3 seeds and block-bootstrap CIs (`pmgst.evaluate`).
-
+How to read it: PMGST beats the cheap baselines B0-B2 by a wide margin, but **it does not beat the plain U-Net (B3) here**.
+All the deep models sit between 0.58 and 0.69 AP, and the gaps among them (about 0.05-0.10) are within what one seed on a 30-chip val split can move, so this is not a ranking.
+What it does say: the extra blocks have not earned their place on synthetic data, and a bigger model alone is not an argument.
+The real test is section 5 and 5b on real Himachal chips: 3 seeds each, block-bootstrap CIs (`pmgst.evaluate`), same split.
+On the GPU (full-size model, synth128) run B3 next to PMGST before reading anything into either number.

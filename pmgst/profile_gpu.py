@@ -13,7 +13,7 @@ import torch
 
 from .config import load_config
 from .losses import PMGSTLoss
-from .models.pmgst_net import PMGSTNet
+from .models.build import build_model
 from .train import amp_setup, pick_device
 
 
@@ -42,7 +42,7 @@ def main():
     ap.add_argument("--max", type=int, default=32)
     a = ap.parse_args()
     cfg = load_config(a.config, a.set); device = pick_device(cfg); _, dtype, _ = amp_setup(cfg, device)
-    model = PMGSTNet(cfg).to(device); model.train(); crit = PMGSTLoss(cfg.loss)
+    model = build_model(cfg).to(device); model.train(); crit = PMGSTLoss(cfg.loss)
     print(f"device {device} | params {model.n_params() / 1e6:.1f}M | chip {cfg.data.chip} ctx {cfg.data.ctx} T {cfg.data.t_max} | ckpt {cfg.model.ckpt}")
     B, ok = 1, 0
     while B <= a.max:

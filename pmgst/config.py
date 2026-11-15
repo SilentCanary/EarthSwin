@@ -28,10 +28,12 @@ class DataCfg:
     p_drop_s2: float = 0.3            # modality dropout (block 5 training trick)
     p_drop_s1: float = 0.2            # per S1 date
     num_workers: int = 2
+    holdout_region: str = ""          # "" = spatial-block folds; else all chips of this region (district) are the test set
 
 
 @dataclass
 class ModelCfg:
+    arch: str = "pmgst"               # "pmgst" | "unet" (B3) | "siam" (B4) | "utae" (B5): same I/O, see models/baselines_dl.py
     dims: list = field(default_factory=lambda: [48, 96, 192, 384])
     depths: list = field(default_factory=lambda: [2, 2, 2, 2])
     heads: list = field(default_factory=lambda: [3, 6, 12, 24])
@@ -87,6 +89,7 @@ class TrainCfg:
     amp: str = "auto"                 # auto | bf16 | fp16 | none
     patience: int = 12
     pos_frac: float = 0.5             # share of training clusters seeded on a landslide chip
+    hard_frac: float = 0.2            # share seeded on hard negatives (steep, no landslide); the rest random
     seed: int = 42
     device: str = "auto"
     clip_grad: float = 1.0
